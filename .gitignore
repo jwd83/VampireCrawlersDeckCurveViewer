@@ -1,0 +1,56 @@
+# This repository lives inside a Steam game install.
+# Ignore everything at the game root by default so the commercial game files,
+# BepInEx runtime, generated interop assemblies, and downloaded archives are
+# not accidentally published.
+/*
+
+# Keep repository metadata and top-level project docs.
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/LICENSE
+!/LICENSE.*
+
+# Keep GitHub metadata if added later.
+!/.github/
+!/.github/**/
+!/.github/**/*.md
+!/.github/**/*.yml
+!/.github/**/*.yaml
+
+# Keep the mod source project.
+!/DeckCurveViewer/
+!/DeckCurveViewer/**/
+!/DeckCurveViewer/**/*.cs
+!/DeckCurveViewer/**/*.csproj
+!/DeckCurveViewer/**/*.props
+!/DeckCurveViewer/**/*.targets
+!/DeckCurveViewer/**/*.sln
+!/DeckCurveViewer/**/*.json
+!/DeckCurveViewer/**/*.md
+!/DeckCurveViewer/**/*.txt
+
+# Ignore local/generated mod artifacts.
+/DeckCurveViewer/bin/
+/DeckCurveViewer/obj/
+/DeckCurveViewer/dist/
+/DeckCurveViewer/downloads/
+
+# Ignore local analysis and generated game interop artifacts.
+/.codex/
+
+# Explicit normal game/runtime files. These are already covered by /*, but are
+# listed here as guardrails if the whitelist is changed later.
+/BepInEx/
+/D3D12/
+/dotnet/
+/Vampire Crawlers_Data/
+/.doorstop_version
+/baselib.dll
+/changelog.txt
+/doorstop_config.ini
+/GameAssembly.dll
+/UnityCrashHandler64.exe
+/UnityPlayer.dll
+/Vampire Crawlers.exe
+/winhttp.dll
