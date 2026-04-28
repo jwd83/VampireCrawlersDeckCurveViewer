@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using Nosebleed.Pancake.Models;
 using UnityEngine;
 
 namespace DeckCurveViewer;
@@ -28,18 +28,10 @@ public sealed class Plugin : BasePlugin
 
 public sealed class DeckCurveOverlay : MonoBehaviour
 {
-    private const string PlayerModelTypeName = "Nosebleed.Pancake.Models.PlayerModel";
-    private static readonly BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-    private static readonly BindingFlags StaticMembers = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
     private readonly List<CardSummary> _cards = new();
     private readonly Dictionary<int, int> _curve = new();
-    private Rect _buttonRect = new(24f, 170f, 136f, 34f);
-    private Rect _windowRect = new(180f, 110f, 430f, 560f);
-    private Vector2 _scroll;
-    private Type? _playerModelType;
-    private MethodInfo? _findObjectsOfTypeAllMethod;
-    private object? _playerModel;
+    private PlayerModel? _playerModel;
+    private int _firstVisibleCardIndex;
     private float _nextPlayerLookup;
     private float _nextRefresh;
     private bool _showWindow;
@@ -54,103 +46,161 @@ public sealed class DeckCurveOverlay : MonoBehaviour
     {
         GUI.depth = -5000;
 
-        if (GUI.Button(_buttonRect, "Deck Curve"))
-        {
-            _showWindow = !_showWindow;
-            if (_showWindow)
-            {
-                RefreshDeck(forcePlayerLookup: true);
-            }
-        }
-
-        if (!_showWindow)
-        {
-            return;
-        }
-
         if (Time.unscaledTime >= _nextRefresh)
         {
             RefreshDeck(forcePlayerLookup: false);
             _nextRefresh = Time.unscaledTime + 0.75f;
         }
 
-        DrawWindow();
-    }
+        var scale = GetUiScale();
+        var previousButtonFontSize = GUI.skin.button.fontSize;
+        var previousLabelFontSize = GUI.skin.label.fontSize;
+        var previousBoxFontSize = GUI.skin.box.fontSize;
 
-    private void DrawWindow()
-    {
-        GUI.Box(_windowRect, "Deck Curve");
+        GUI.skin.button.fontSize = Mathf.RoundToInt(16f * scale);
+        GUI.skin.label.fontSize = Mathf.RoundToInt(16f * scale);
+        GUI.skin.box.fontSize = Mathf.RoundToInt(18f * scale);
 
-        var contentRect = new Rect(
-            _windowRect.x + 12f,
-            _windowRect.y + 28f,
-            _windowRect.width - 24f,
-            _windowRect.height - 40f);
-
-        GUILayout.BeginArea(contentRect);
-        GUILayout.BeginVertical();
         try
         {
-            GUILayout.BeginHorizontal();
-            try
+            var totalCards = _cards.Sum(card => card.Count);
+            var buttonLabel = totalCards > 0 ? $"Deck Curve ({totalCards})" : "Deck Curve";
+            if (GUI.Button(GetButtonRect(scale), buttonLabel))
             {
-                GUILayout.Label($"Cards: {_cards.Sum(card => card.Count)}", GUILayout.Width(90f));
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Refresh", GUILayout.Width(86f)))
+                _showWindow = !_showWindow;
+                if (_showWindow)
                 {
                     RefreshDeck(forcePlayerLookup: true);
                 }
-
-                if (GUILayout.Button("Close", GUILayout.Width(70f)))
-                {
-                    _showWindow = false;
-                }
             }
-            finally
+
+            if (_showWindow)
             {
-                GUILayout.EndHorizontal();
+                DrawWindow(scale);
             }
-
-            GUILayout.Space(6f);
-            GUILayout.Label("Curve");
-            DrawCurve();
-
-            GUILayout.Space(8f);
-            GUILayout.Label("Cards");
-            _scroll = GUILayout.BeginScrollView(_scroll, false, true);
-            if (_cards.Count == 0)
-            {
-                GUILayout.Label(_status);
-            }
-            else
-            {
-                foreach (var card in _cards)
-                {
-                    GUILayout.Label($"{card.Cost,2}  x{card.Count,-2} {card.Name}");
-                }
-            }
-
-            GUILayout.EndScrollView();
         }
         finally
         {
-            GUILayout.EndVertical();
-            GUILayout.EndArea();
+            GUI.skin.button.fontSize = previousButtonFontSize;
+            GUI.skin.label.fontSize = previousLabelFontSize;
+            GUI.skin.box.fontSize = previousBoxFontSize;
         }
     }
 
-    private void DrawCurve()
+    private void DrawWindow(float scale)
     {
-        if (_curve.Count == 0)
+        var windowRect = GetWindowRect(scale);
+        var padding = 16f * scale;
+        var rowHeight = 24f * scale;
+        var buttonWidth = 92f * scale;
+
+        GUI.Box(windowRect, "Deck Curve");
+
+        var y = windowRect.y + 42f * scale;
+        var contentX = windowRect.x + padding;
+        var contentWidth = windowRect.width - padding * 2f;
+
+        GUI.Label(new Rect(contentX, y, 160f * scale, rowHeight), $"Cards: {_cards.Sum(card => card.Count)}");
+        if (GUI.Button(new Rect(windowRect.xMax - padding - buttonWidth * 2f - 8f * scale, y, buttonWidth, rowHeight * 1.2f), "Refresh"))
         {
-            GUILayout.Label(_status);
+            RefreshDeck(forcePlayerLookup: true);
+        }
+
+        if (GUI.Button(new Rect(windowRect.xMax - padding - buttonWidth, y, buttonWidth, rowHeight * 1.2f), "Close"))
+        {
+            _showWindow = false;
             return;
         }
 
-        foreach (var cost in _curve.Keys.OrderBy(cost => cost))
+        y += rowHeight * 1.7f;
+        GUI.Label(new Rect(contentX, y, contentWidth, rowHeight), "Curve");
+        y += rowHeight;
+
+        if (_curve.Count == 0)
         {
-            GUILayout.Label($"{cost,2}: {_curve[cost]}");
+            GUI.Label(new Rect(contentX, y, contentWidth, rowHeight), _status);
         }
+        else
+        {
+            var x = contentX;
+            foreach (var cost in _curve.Keys.OrderBy(cost => cost))
+            {
+                GUI.Label(new Rect(x, y, 64f * scale, rowHeight), $"{cost}: {_curve[cost]}");
+                x += 66f * scale;
+            }
+        }
+
+        y += rowHeight * 1.6f;
+        GUI.Label(new Rect(contentX, y, contentWidth, rowHeight), "Cards");
+        y += rowHeight;
+
+        var listRect = new Rect(contentX, y, contentWidth, windowRect.yMax - padding - y - rowHeight * 1.6f);
+        GUI.Box(listRect, string.Empty);
+
+        var visibleRows = Math.Max(1, Mathf.FloorToInt((listRect.height - padding) / rowHeight));
+        _firstVisibleCardIndex = Math.Max(0, Math.Min(_firstVisibleCardIndex, Math.Max(0, _cards.Count - visibleRows)));
+
+        if (_cards.Count == 0)
+        {
+            GUI.Label(new Rect(listRect.x + padding, listRect.y + padding / 2f, listRect.width - padding * 2f, rowHeight), _status);
+        }
+        else
+        {
+            for (var i = 0; i < visibleRows; i++)
+            {
+                var cardIndex = _firstVisibleCardIndex + i;
+                if (cardIndex >= _cards.Count)
+                {
+                    break;
+                }
+
+                var card = _cards[cardIndex];
+                GUI.Label(
+                    new Rect(listRect.x + padding, listRect.y + padding / 2f + i * rowHeight, listRect.width - padding * 2f, rowHeight),
+                    $"{card.Cost,2}  x{card.Count,-2} {card.Name}");
+            }
+        }
+
+        var navY = windowRect.yMax - padding - rowHeight * 1.2f;
+        if (GUI.Button(new Rect(contentX, navY, buttonWidth, rowHeight * 1.2f), "Up"))
+        {
+            _firstVisibleCardIndex = Math.Max(0, _firstVisibleCardIndex - visibleRows);
+        }
+
+        if (GUI.Button(new Rect(contentX + buttonWidth + 8f * scale, navY, buttonWidth, rowHeight * 1.2f), "Down"))
+        {
+            _firstVisibleCardIndex = Math.Min(Math.Max(0, _cards.Count - visibleRows), _firstVisibleCardIndex + visibleRows);
+        }
+
+        GUI.Label(
+            new Rect(contentX + buttonWidth * 2f + 24f * scale, navY, contentWidth - buttonWidth * 2f - 24f * scale, rowHeight),
+            _cards.Count == 0 ? string.Empty : $"{_firstVisibleCardIndex + 1}-{Math.Min(_cards.Count, _firstVisibleCardIndex + visibleRows)} of {_cards.Count}");
+    }
+
+    private static float GetUiScale()
+    {
+        return Mathf.Clamp(Screen.height / 720f, 1.25f, 2.2f);
+    }
+
+    private static Rect GetButtonRect(float scale)
+    {
+        var width = 190f * scale;
+        var height = 48f * scale;
+        var margin = 18f * scale;
+        var y = Mathf.Clamp(Screen.height * 0.48f, margin, Screen.height - height - margin);
+        return new Rect(margin, y, width, height);
+    }
+
+    private static Rect GetWindowRect(float scale)
+    {
+        var margin = 24f * scale;
+        var width = Mathf.Min(620f * scale, Screen.width - margin * 2f);
+        var height = Mathf.Min(620f * scale, Screen.height - margin * 2f);
+        return new Rect(
+            (Screen.width - width) / 2f,
+            (Screen.height - height) / 2f,
+            width,
+            height);
     }
 
     private void RefreshDeck(bool forcePlayerLookup)
@@ -164,18 +214,18 @@ public sealed class DeckCurveOverlay : MonoBehaviour
                 return;
             }
 
-            var allCards = GetPropertyValue(player, "AllCards");
-            var cardCount = GetCollectionCount(allCards);
-            if (allCards == null || cardCount <= 0)
+            var allCards = player.AllCards;
+            if (allCards == null)
             {
-                SetEmpty("No cards found.");
+                SetEmpty("Player has no AllCards collection.");
                 return;
             }
 
-            var rows = new List<CardSummary>();
+            var cardCount = allCards.Cast<Il2CppSystem.Collections.Generic.IReadOnlyCollection<CardModel>>().Count;
+            var rows = new List<CardSummary>(cardCount);
             for (var i = 0; i < cardCount; i++)
             {
-                var card = GetCollectionItem(allCards, i);
+                var card = allCards.get_Item(i);
                 if (card == null)
                 {
                     continue;
@@ -197,7 +247,8 @@ public sealed class DeckCurveOverlay : MonoBehaviour
                 _curve[group.Key] = group.Count();
             }
 
-            _status = _cards.Count == 0 ? "No cards found." : string.Empty;
+            _status = _cards.Count == 0 ? "Deck is empty." : string.Empty;
+            _firstVisibleCardIndex = Math.Max(0, Math.Min(_firstVisibleCardIndex, Math.Max(0, _cards.Count - 1)));
         }
         catch (Exception ex)
         {
@@ -206,9 +257,9 @@ public sealed class DeckCurveOverlay : MonoBehaviour
         }
     }
 
-    private object? GetPlayerModel(bool force)
+    private PlayerModel? GetPlayerModel(bool force)
     {
-        if (!force && _playerModel != null)
+        if (!force && _playerModel != null && _playerModel.AllCards != null)
         {
             return _playerModel;
         }
@@ -219,182 +270,60 @@ public sealed class DeckCurveOverlay : MonoBehaviour
         }
 
         _nextPlayerLookup = Time.unscaledTime + 2f;
-        _playerModelType ??= ResolveType(PlayerModelTypeName);
-        if (_playerModelType == null)
-        {
-            return null;
-        }
 
-        _findObjectsOfTypeAllMethod ??= typeof(Resources)
-            .GetMethods(StaticMembers)
-            .FirstOrDefault(method =>
-                method.Name == nameof(Resources.FindObjectsOfTypeAll)
-                && method.IsGenericMethodDefinition
-                && method.GetParameters().Length == 0);
-
-        if (_findObjectsOfTypeAllMethod == null)
-        {
-            return null;
-        }
-
-        var players = _findObjectsOfTypeAllMethod.MakeGenericMethod(_playerModelType).Invoke(null, null);
-        var playerCount = GetCollectionCountOrLength(players);
+        var players = Resources.FindObjectsOfTypeAll<PlayerModel>();
         _playerModel = null;
 
-        for (var i = 0; i < playerCount; i++)
+        if (players == null)
         {
-            var player = GetCollectionItem(players!, i);
-            if (player != null)
+            return null;
+        }
+
+        for (var i = 0; i < players.Length; i++)
+        {
+            var candidate = players[i];
+            if (candidate == null)
             {
-                _playerModel = player;
+                continue;
+            }
+
+            var cards = candidate.AllCards;
+            if (cards != null && cards.Cast<Il2CppSystem.Collections.Generic.IReadOnlyCollection<CardModel>>().Count > 0)
+            {
+                _playerModel = candidate;
                 break;
             }
+
+            // Fallback to first non-null candidate so the diagnostic surfaces even when AllCards is empty.
+            _playerModel ??= candidate;
         }
 
         return _playerModel;
     }
 
-    private static Type? ResolveType(string fullName)
+    private static CardSummary ReadCard(CardModel card)
     {
-        TryLoadAssembly("Assembly-CSharp");
-
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        var cost = 0;
+        try
         {
-            var type = assembly.GetType(fullName, throwOnError: false);
-            if (type != null)
+            cost = card.GetCardCostTypeManaCost(false);
+        }
+        catch
+        {
+            var config = card.CardConfig;
+            if (config != null)
             {
-                return type;
+                cost = config.manaCost;
             }
         }
 
-        Plugin.LoggerInstance?.LogWarning($"Could not resolve runtime type {fullName}");
-        return null;
-    }
-
-    private static void TryLoadAssembly(string assemblyName)
-    {
-        try
-        {
-            Assembly.Load(assemblyName);
-        }
-        catch
-        {
-            // BepInEx usually loads generated interop assemblies before plugins.
-        }
-    }
-
-    private static CardSummary ReadCard(object card)
-    {
-        var name = GetString(GetPropertyValue(card, "Name"));
-        var cost = InvokeInt(card, "GetCardCostTypeManaCost", false)
-            ?? InvokeInt(card, "GetManaCost")
-            ?? ReadCardConfigCost(card)
-            ?? 0;
-
+        var name = card.Name;
         if (string.IsNullOrWhiteSpace(name))
         {
-            name = ReadCardConfigName(card) ?? "<unnamed>";
+            name = card.CardConfig?.Name ?? "<unnamed>";
         }
 
         return new CardSummary(name, Math.Max(0, cost), 1);
-    }
-
-    private static int? ReadCardConfigCost(object card)
-    {
-        var config = GetPropertyValue(card, "CardConfig");
-        return config == null ? null : InvokeInt(config, "GetManaCost") ?? GetInt(GetFieldOrPropertyValue(config, "manaCost"));
-    }
-
-    private static string? ReadCardConfigName(object card)
-    {
-        var config = GetPropertyValue(card, "CardConfig");
-        return config == null ? null : GetString(GetPropertyValue(config, "Name"));
-    }
-
-    private static object? GetPropertyValue(object? source, string propertyName)
-    {
-        if (source == null)
-        {
-            return null;
-        }
-
-        var property = source.GetType().GetProperty(propertyName, InstanceMembers | StaticMembers);
-        return property?.GetValue(source);
-    }
-
-    private static object? GetFieldOrPropertyValue(object? source, string memberName)
-    {
-        if (source == null)
-        {
-            return null;
-        }
-
-        var type = source.GetType();
-        var property = type.GetProperty(memberName, InstanceMembers | StaticMembers);
-        if (property != null)
-        {
-            return property.GetValue(source);
-        }
-
-        var field = type.GetField(memberName, InstanceMembers | StaticMembers);
-        return field?.GetValue(source);
-    }
-
-    private static int GetCollectionCount(object? collection)
-    {
-        return GetInt(GetPropertyValue(collection, "Count")) ?? 0;
-    }
-
-    private static int GetCollectionCountOrLength(object? collection)
-    {
-        return GetInt(GetPropertyValue(collection, "Count"))
-            ?? GetInt(GetPropertyValue(collection, "Length"))
-            ?? 0;
-    }
-
-    private static object? GetCollectionItem(object collection, int index)
-    {
-        var type = collection.GetType();
-        var indexer = type.GetProperty("Item", InstanceMembers, null, null, new[] { typeof(int) }, null);
-        if (indexer != null)
-        {
-            return indexer.GetValue(collection, new object[] { index });
-        }
-
-        var getItem = type.GetMethod("get_Item", InstanceMembers, null, new[] { typeof(int) }, null);
-        return getItem?.Invoke(collection, new object[] { index });
-    }
-
-    private static int? InvokeInt(object source, string methodName, params object[] args)
-    {
-        var argTypes = args.Select(arg => arg.GetType()).ToArray();
-        var method = source.GetType().GetMethod(methodName, InstanceMembers, null, argTypes, null)
-            ?? source.GetType().GetMethods(InstanceMembers)
-                .FirstOrDefault(candidate => candidate.Name == methodName && candidate.GetParameters().Length == args.Length);
-
-        return method == null ? null : GetInt(method.Invoke(source, args));
-    }
-
-    private static int? GetInt(object? value)
-    {
-        if (value == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return Convert.ToInt32(value);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string GetString(object? value)
-    {
-        return value?.ToString() ?? string.Empty;
     }
 
     private static string NormalizeCardName(string name)
