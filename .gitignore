@@ -33,8 +33,10 @@
 # Ignore local/generated mod artifacts.
 /DeckCurveViewer/bin/
 /DeckCurveViewer/obj/
-/DeckCurveViewer/dist/
 /DeckCurveViewer/downloads/
+
+# Keep the published release DLL under dist/.
+!/DeckCurveViewer/dist/DeckCurveViewer.dll
 
 # Ignore local analysis and generated game interop artifacts.
 /.codex/
