@@ -64,7 +64,15 @@ public sealed class DeckCurveOverlay : MonoBehaviour
         try
         {
             var totalCards = _cards.Sum(card => card.Count);
-            var buttonLabel = totalCards > 0 ? $"Deck Curve ({totalCards})" : "Deck Curve";
+            if (totalCards <= 0)
+            {
+                _showWindow = false;
+                return;
+            }
+
+            DrawCurveGraph(scale);
+
+            var buttonLabel = $"Deck Curve ({totalCards})";
             if (GUI.Button(GetButtonRect(scale), buttonLabel))
             {
                 _showWindow = !_showWindow;
@@ -85,6 +93,68 @@ public sealed class DeckCurveOverlay : MonoBehaviour
             GUI.skin.label.fontSize = previousLabelFontSize;
             GUI.skin.box.fontSize = previousBoxFontSize;
         }
+    }
+
+    private void DrawCurveGraph(float scale)
+    {
+        var graphRect = GetGraphRect(scale);
+        var padding = 8f * scale;
+        var labelHeight = 18f * scale;
+        var graphHeight = graphRect.height - padding * 2f - labelHeight;
+        var bucketCount = 8;
+        var bucketGap = 3f * scale;
+        var bucketWidth = (graphRect.width - padding * 2f - bucketGap * (bucketCount - 1)) / bucketCount;
+        var maxCount = Math.Max(1, _curve.Count == 0 ? 0 : _curve.Values.Max());
+
+        GUI.Box(graphRect, string.Empty);
+
+        var previousFontSize = GUI.skin.label.fontSize;
+
+        try
+        {
+            GUI.skin.label.fontSize = Mathf.RoundToInt(11f * scale);
+
+            for (var bucket = 0; bucket < bucketCount; bucket++)
+            {
+                var count = GetCurveBucketCount(bucket);
+                var normalizedHeight = count <= 0 ? 0f : Mathf.Max(3f * scale, graphHeight * count / maxCount);
+                var x = graphRect.x + padding + bucket * (bucketWidth + bucketGap);
+                var barY = graphRect.y + padding + graphHeight - normalizedHeight;
+                var barRect = new Rect(x, barY, bucketWidth, normalizedHeight);
+
+                if (count > 0)
+                {
+                    GUI.Box(barRect, string.Empty);
+                }
+
+                GUI.Label(
+                    new Rect(x - bucketGap / 2f, graphRect.yMax - padding - labelHeight, bucketWidth + bucketGap, labelHeight),
+                    bucket == 7 ? "7+" : bucket.ToString());
+            }
+        }
+        finally
+        {
+            GUI.skin.label.fontSize = previousFontSize;
+        }
+    }
+
+    private int GetCurveBucketCount(int bucket)
+    {
+        if (bucket < 7)
+        {
+            return _curve.TryGetValue(bucket, out var count) ? count : 0;
+        }
+
+        var total = 0;
+        foreach (var pair in _curve)
+        {
+            if (pair.Key >= 7)
+            {
+                total += pair.Value;
+            }
+        }
+
+        return total;
     }
 
     private void DrawWindow(float scale)
@@ -187,8 +257,16 @@ public sealed class DeckCurveOverlay : MonoBehaviour
         var width = 190f * scale;
         var height = 48f * scale;
         var margin = 18f * scale;
-        var y = Mathf.Clamp(Screen.height * 0.48f, margin, Screen.height - height - margin);
-        return new Rect(margin, y, width, height);
+        return new Rect(margin, Screen.height - height - margin, width, height);
+    }
+
+    private static Rect GetGraphRect(float scale)
+    {
+        var buttonRect = GetButtonRect(scale);
+        var gap = 8f * scale;
+        var height = 96f * scale;
+        var y = Mathf.Max(18f * scale, buttonRect.y - gap - height);
+        return new Rect(buttonRect.x, y, buttonRect.width, height);
     }
 
     private static Rect GetWindowRect(float scale)
