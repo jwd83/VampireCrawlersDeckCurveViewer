@@ -108,10 +108,12 @@ public sealed class DeckCurveOverlay : MonoBehaviour
 
         GUI.Box(graphRect, string.Empty);
 
+        var previousButtonFontSize = GUI.skin.button.fontSize;
         var previousFontSize = GUI.skin.label.fontSize;
 
         try
         {
+            GUI.skin.button.fontSize = Mathf.RoundToInt(10f * scale);
             GUI.skin.label.fontSize = Mathf.RoundToInt(11f * scale);
 
             for (var bucket = 0; bucket < bucketCount; bucket++)
@@ -124,7 +126,7 @@ public sealed class DeckCurveOverlay : MonoBehaviour
 
                 if (count > 0)
                 {
-                    GUI.Box(barRect, string.Empty);
+                    GUI.Button(barRect, count.ToString());
                 }
 
                 GUI.Label(
@@ -134,6 +136,7 @@ public sealed class DeckCurveOverlay : MonoBehaviour
         }
         finally
         {
+            GUI.skin.button.fontSize = previousButtonFontSize;
             GUI.skin.label.fontSize = previousFontSize;
         }
     }
